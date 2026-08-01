@@ -1,0 +1,43 @@
+{
+  "name": "napcat-plugin-group-network-filter",
+  "plugin": "群网络过滤网关",
+  "version": "0.4.1",
+  "author": "local",
+  "private": true,
+  "type": "module",
+  "description": "为 NapCat 提供按群白名单隔离的 OneBot 11 多协议网络网关",
+  "main": "dist/index.mjs",
+  "scripts": {
+    "build": "vite build",
+    "dev": "vite build --watch",
+    "typecheck": "tsc --noEmit",
+    "smoke:ws-server": "node scripts/smoke-ws-server.mjs",
+    "smoke:ws-client": "node scripts/smoke-ws-client.mjs",
+    "smoke:webui": "node scripts/smoke-webui.mjs",
+    "preview:webui": "node scripts/preview-webui.mjs"
+  },
+  "keywords": [
+    "napcat",
+    "onebot",
+    "websocket",
+    "http",
+    "group-filter"
+  ],
+  "license": "MIT",
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "napcat": {
+    "tags": ["工具", "网络"]
+  },
+  "dependencies": {
+    "ws": "^8.18.3"
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.3",
+    "@types/ws": "^8.18.1",
+    "typescript": "^5.8.3",
+    "vite": "^6.1.0"
+  }
+}
