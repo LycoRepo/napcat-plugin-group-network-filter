@@ -34,7 +34,7 @@ try {
   // 只编译脚本，不执行浏览器逻辑。
   new Function(scriptMatch[1]);
 
-  const requiredText = ['config-card', 'modal-backdrop', '新增配置', '编辑网络配置', 'type="text" autocomplete="off"'];
+  const requiredText = ['config-card', 'modal-backdrop', '新增配置', '编辑网络配置', 'type="text" autocomplete="off"', 'name="allowedPrivateIds"', '<span>联系人</span>', 'profile-private-contacts', '留空表示沿用旧行为'];
   for (const text of requiredText) {
     if (!html.includes(text)) throw new Error(`WebUI 缺少关键内容: ${text}`);
   }
