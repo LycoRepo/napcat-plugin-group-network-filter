@@ -146,6 +146,12 @@ export function isActionAllowed(
   return { allowed: false, reason: `严格模式禁止无法关联到白名单群的 Action: ${action}` };
 }
 
+function asRecord(value: unknown): Record<string, unknown> | undefined {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : undefined;
+}
+
 function filterValue(value: unknown, allowedGroups: Set<string>): unknown {
   if (Array.isArray(value)) {
     return value
@@ -165,7 +171,73 @@ function filterValue(value: unknown, allowedGroups: Set<string>): unknown {
   );
 }
 
-export function filterActionResult(profile: NetworkProfile, data: unknown): unknown {
-  if (!profile.strictActionGuard) return data;
-  return filterValue(data, new Set(profile.allowedGroupIds)) ?? null;
+export type ActionResultAuthorization =
+  | { allowed: true; data: unknown }
+  | { allowed: false; reason: string };
+
+// get_msg 结果授权（《最小变更方案 v5》§4.6）：结果里真正被允许的是「消息属主」，而不是请求参数。
+function authorizeGetMsgResult(
+  profile: NetworkProfile,
+  data: unknown,
+  context: { selfId: string },
+): ActionResultAuthorization {
+  const allowedGroups = new Set(profile.allowedGroupIds);
+  // 联系人边界未启用（名单为空）：保持旧行为，不新增扣留，仅保留群结果过滤。
+  if (profile.allowedPrivateIds.length === 0) {
+    return { allowed: true, data: filterValue(data, allowedGroups) ?? null };
+  }
+
+  const object = asRecord(data);
+  const messageType = object && typeof object.message_type === 'string' ? object.message_type : undefined;
+
+  if (messageType === 'private') {
+    // selfId 不可用时无法区分对端与机器人自身，fail-closed 扣留。
+    const selfId = context.selfId;
+    const selfAvailable = selfId !== '' && selfId !== '0';
+    const userId = object ? getUserId(object.user_id) : undefined;
+    if (!selfAvailable) {
+      return { allowed: false, reason: 'selfId 不可用，无法确认 get_msg 私聊结果属主，扣留结果' };
+    }
+    if (userId === undefined) {
+      return { allowed: false, reason: '无法从 get_msg 结果解析私聊属主 user_id，扣留结果' };
+    }
+    if (userId === selfId) {
+      return { allowed: false, reason: 'get_msg 私聊结果为机器人自身消息，无法确定对端，扣留结果' };
+    }
+    if (!profile.allowedPrivateIds.includes(userId)) {
+      return {
+        allowed: false,
+        reason: `联系人 ${userId} 不在配置 ${profile.name} 的私聊白名单中，扣留 get_msg 结果`,
+      };
+    }
+    // 命中联系人即放行；临时会话即使带 group_id 也按 user_id 判定，不走群过滤分支。
+    return { allowed: true, data };
+  }
+
+  if (messageType === 'group') {
+    const groupId = object ? getGroupId(object.group_id) : undefined;
+    if (groupId === undefined) {
+      return { allowed: false, reason: '无法从 get_msg 结果解析群属主 group_id，扣留结果' };
+    }
+    if (!profile.allowedGroupIds.includes(groupId)) {
+      return {
+        allowed: false,
+        reason: `群 ${groupId} 不在配置 ${profile.name} 的白名单中，扣留 get_msg 结果`,
+      };
+    }
+    return { allowed: true, data: filterValue(data, allowedGroups) ?? null };
+  }
+
+  return { allowed: false, reason: '无法确定 get_msg 结果属主，扣留结果' };
+}
+
+export function filterActionResult(
+  profile: NetworkProfile,
+  action: string,
+  data: unknown,
+  context: { selfId: string },
+): ActionResultAuthorization {
+  if (!profile.strictActionGuard) return { allowed: true, data };
+  if (normalizeActionName(action) === 'get_msg') return authorizeGetMsgResult(profile, data, context);
+  return { allowed: true, data: filterValue(data, new Set(profile.allowedGroupIds)) ?? null };
 }

@@ -122,10 +122,22 @@ export class GatewayRuntime {
 
     try {
       const result = await this.callNapCat(request.action, params);
+      // get_msg 结果按消息属主授权；selfId 在实例绑定时已取得（《最小变更方案 v5》§4.10）。
+      const authorization = filterActionResult(profile, request.action, result, { selfId: this.selfId });
+      if (!authorization.allowed) {
+        return {
+          status: 'failed',
+          retcode: 1403,
+          data: null,
+          message: authorization.reason,
+          wording: authorization.reason,
+          echo: request.echo,
+        };
+      }
       return {
         status: 'ok',
         retcode: 0,
-        data: filterActionResult(profile, result),
+        data: authorization.data,
         echo: request.echo,
       };
     } catch (error) {
