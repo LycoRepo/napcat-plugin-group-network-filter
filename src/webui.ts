@@ -195,7 +195,7 @@ function createWebUiHtml(pluginId: string): string {
     .card-title h3 { margin: 9px 0 4px; font-size: 17px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     .endpoint { display: block; color: var(--muted); font: 12px/1.5 ui-monospace,SFMono-Regular,Consolas,monospace; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     .badge { display: inline-flex; padding: 4px 8px; border-radius: 999px; color: var(--primary); background: color-mix(in srgb,var(--primary) 13%,transparent); font-size: 12px; font-weight: 700; }
-    .card-stats { display: grid; grid-template-columns: repeat(3,1fr); gap: 8px; margin: 17px 0; }
+    .card-stats { display: grid; grid-template-columns: repeat(4,1fr); gap: 8px; margin: 17px 0; }
     .stat { padding: 10px; border-radius: 10px; background: var(--surface-2); }
     .stat strong { display: block; font-size: 14px; }
     .stat span { color: var(--muted); font-size: 11px; }
@@ -319,6 +319,7 @@ function createWebUiHtml(pluginId: string): string {
           <h3>群白名单与权限</h3>
           <div class="grid">
             <div class="field full"><label for="profile-groups">允许的群号</label><textarea id="profile-groups" name="allowedGroupIds" placeholder="每行填写一个群号，也支持逗号或空格分隔"></textarea><div class="hint">空列表表示不允许任何群，而不是允许全部群</div></div>
+            <div class="field full"><label for="profile-private-contacts">允许的私聊联系人</label><textarea id="profile-private-contacts" name="allowedPrivateIds" placeholder="每行填写一个 QQ 号，也支持逗号或空格分隔"></textarea><div class="hint">仅控制私聊转发与私聊 Action。留空表示沿用旧行为，放行全部私聊入站，也不会自动放行任何私聊 Action。需要机器人在私聊中回复某位联系人时，必须把该 QQ 号填入此名单。</div></div>
             <div class="field full"><div class="checks">
               <label class="check"><input id="profile-private" name="forwardPrivateMessages" type="checkbox"><div><strong>转发私聊消息</strong><span>允许目标服务接收私聊事件</span></div></label>
               <label class="check"><input id="profile-events" name="forwardNonGroupEvents" type="checkbox"><div><strong>转发非群事件</strong><span>转发不含 group_id 的通知和请求</span></div></label>
@@ -384,6 +385,7 @@ function createWebUiHtml(pluginId: string): string {
           url: transport === 'websocket-client' ? 'ws://127.0.0.1:6199/ws' : transport === 'http-client' ? 'http://127.0.0.1:8080/onebot/events' : '',
           accessToken: '',
           allowedGroupIds: [],
+          allowedPrivateIds: [],
           forwardPrivateMessages: false,
           forwardNonGroupEvents: false,
           forwardMetaEvents: true,
@@ -400,6 +402,7 @@ function createWebUiHtml(pluginId: string): string {
       function normalizeProfile(profile) {
         var result = Object.assign(defaultProfile(profile.transport || 'websocket-client'), profile || {});
         result.allowedGroupIds = Array.isArray(result.allowedGroupIds) ? result.allowedGroupIds.map(String) : [];
+        result.allowedPrivateIds = Array.isArray(result.allowedPrivateIds) ? result.allowedPrivateIds.map(String) : [];
         result.allowedActions = Array.isArray(result.allowedActions) ? result.allowedActions.map(String) : [];
         return result;
       }
@@ -418,7 +421,7 @@ function createWebUiHtml(pluginId: string): string {
         return '<article class="config-card ' + (profile.enabled ? '' : 'disabled') + '">'
           + '<div class="card-head"><div class="card-title"><span class="badge">' + esc(labels[profile.transport] || profile.transport) + '</span><h3>' + esc(profile.name) + '</h3><code class="endpoint">' + esc(endpoint(profile)) + '</code></div>'
           + '<label class="switch" title="启用或停用"><input type="checkbox" data-action="toggle" data-index="' + index + '" ' + (profile.enabled ? 'checked' : '') + '><span class="slider"></span></label></div>'
-          + '<div class="card-stats"><div class="stat"><strong>' + profile.allowedGroupIds.length + '</strong><span>允许群</span></div><div class="stat"><strong>' + esc(transportKind(profile)) + '</strong><span>传输协议</span></div><div class="stat"><strong>' + (profile.accessToken ? '已设置' : '未设置') + '</strong><span>Token</span></div></div>'
+          + '<div class="card-stats"><div class="stat"><strong>' + profile.allowedGroupIds.length + '</strong><span>允许群</span></div><div class="stat"><strong>' + (Array.isArray(profile.allowedPrivateIds) ? profile.allowedPrivateIds.length : 0) + '</strong><span>联系人</span></div><div class="stat"><strong>' + esc(transportKind(profile)) + '</strong><span>传输协议</span></div><div class="stat"><strong>' + (profile.accessToken ? '已设置' : '未设置') + '</strong><span>Token</span></div></div>'
           + '<div class="card-actions"><button class="button small" data-action="edit" data-index="' + index + '">编辑</button><button class="button small" data-action="duplicate" data-index="' + index + '">复制</button><button class="button small danger" data-action="delete" data-index="' + index + '">删除</button></div>'
           + '</article>';
       }
@@ -478,6 +481,7 @@ function createWebUiHtml(pluginId: string): string {
         setFormValue('profile-heartbeat',editingProfile.heartbeatIntervalMs);
         setFormValue('profile-reconnect',editingProfile.reconnectIntervalMs);
         setFormValue('profile-groups',editingProfile.allowedGroupIds.join('\n'));
+        setFormValue('profile-private-contacts',editingProfile.allowedPrivateIds.join('\n'));
         setFormValue('profile-private',editingProfile.forwardPrivateMessages);
         setFormValue('profile-events',editingProfile.forwardNonGroupEvents);
         setFormValue('profile-meta',editingProfile.forwardMetaEvents);
@@ -536,6 +540,8 @@ function createWebUiHtml(pluginId: string): string {
         if (!name) throw new Error('请填写配置名称');
         var groups = splitList(document.getElementById('profile-groups').value);
         groups.forEach(function (groupId) { if (!/^\d+$/.test(groupId)) throw new Error('无效群号：' + groupId); });
+        var contacts = splitList(document.getElementById('profile-private-contacts').value);
+        contacts.forEach(function (contactId) { if (!/^\d+$/.test(contactId)) throw new Error('无效联系人 QQ 号：' + contactId); });
         var profile = Object.assign(defaultProfile(transport),editingProfile || {},{
           name: name,
           transport: transport,
@@ -545,6 +551,7 @@ function createWebUiHtml(pluginId: string): string {
           url: document.getElementById('profile-url').value.trim(),
           accessToken: document.getElementById('profile-token').value,
           allowedGroupIds: groups,
+          allowedPrivateIds: contacts,
           forwardPrivateMessages: document.getElementById('profile-private').checked,
           forwardNonGroupEvents: document.getElementById('profile-events').checked,
           forwardMetaEvents: document.getElementById('profile-meta').checked,
