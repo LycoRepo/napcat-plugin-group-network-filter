@@ -1,6 +1,6 @@
 # NapCat 群网络过滤网关
 
-这是一个 NapCat 插件，为每个 OneBot 11 网络配置设置独立的群白名单。只有白名单群的事件会发给对应服务；严格模式下，对端也不能操作非白名单群。
+这是一个 NapCat 插件，为每个 OneBot 11 网络配置设置独立的群白名单和私聊联系人白名单。只有白名单群的事件会发给对应服务；严格模式下，对端也不能操作非白名单群或名单外的私聊联系人。
 
 ## 适用场景
 
@@ -53,12 +53,13 @@ WebUI 页面代码已嵌入 `index.mjs`，插件首次加载时会在插件目�
 
 插件提供独立的可视化配置页面，不再要求用户编辑 `profilesJson`：
 
-- 主页面以卡片形式展示配置名称、协议、连接地址、启用状态、群数量和 Token 状态。
+- 主页面以卡片形式展示配置名称、协议、连接地址、启用状态、群数量、联系人数量和 Token 状态。
 - 点击“新增配置”或卡片上的“编辑”按钮，通过弹窗配置网络连接。
 - 支持在卡片上复制、删除、启用或停用网络配置。
 - 配置 ID 由插件内部自动生成和维护，不会显示在 WebUI 中。
 - 选择正向/反向 WebSocket 或正向/反向 HTTP 后，弹窗会自动显示对应的连接字段。
 - 每行填写一个允许的群号，也支持逗号或空格分隔。
+- 每行填写一个允许的私聊联系人 QQ 号，也支持逗号或空格分隔；留空表示沿用旧行为。
 - 配置 Access Token、私聊与事件转发策略、严格 Action 限制。
 - WebSocket 配置可设置心跳；仅 WebSocket 客户端可设置重连间隔。
 - 弹窗点击“保存”后由服务端再次验证配置，并立即重启插件网络连接。
@@ -84,6 +85,7 @@ WebSocket 使用纯 JavaScript 帧编码和 UTF-8 校验，不依赖 `bufferutil
     "url": "ws://127.0.0.1:6199/ws",
     "accessToken": "",
     "allowedGroupIds": ["123456789"],
+    "allowedPrivateIds": [],
     "forwardPrivateMessages": false,
     "forwardNonGroupEvents": false,
     "forwardMetaEvents": true,
@@ -109,6 +111,7 @@ WebSocket 使用纯 JavaScript 帧编码和 UTF-8 校验，不依赖 `bufferutil
   "port": 3001,
   "accessToken": "change-me",
   "allowedGroupIds": ["123456789", "987654321"],
+  "allowedPrivateIds": [],
   "forwardPrivateMessages": false,
   "forwardNonGroupEvents": false,
   "forwardMetaEvents": true,
@@ -132,6 +135,7 @@ WebSocket 使用纯 JavaScript 帧编码和 UTF-8 校验，不依赖 `bufferutil
     "port": 3002,
     "accessToken": "change-me",
     "allowedGroupIds": ["123456789"],
+    "allowedPrivateIds": [],
     "strictActionGuard": true
   },
   {
@@ -142,6 +146,7 @@ WebSocket 使用纯 JavaScript 帧编码和 UTF-8 校验，不依赖 `bufferutil
     "url": "http://127.0.0.1:8080/onebot/events",
     "accessToken": "change-me",
     "allowedGroupIds": ["123456789"],
+    "allowedPrivateIds": [],
     "forwardPrivateMessages": false,
     "forwardNonGroupEvents": false,
     "forwardMetaEvents": true,
@@ -184,6 +189,7 @@ HTTP 事件端点可以返回 OneBot 快速操作对象，或返回以下通用 
 | `enabled` | `true` | 是否启用该配置 |
 | `transport` | 无 | 四种传输类型之一 |
 | `allowedGroupIds` | `[]` | 允许的群号；空数组表示不允许任何群 |
+| `allowedPrivateIds` | `[]` | 允许的私聊联系人 QQ 号；空数组表示不启用联系人级限制（沿用旧行为）；非空时私聊转发与私聊 Action 仅限名单内联系人 |
 | `accessToken` | 空 | HTTP/WS Bearer Token；生产环境建议填写 |
 | `strictActionGuard` | `true` | 限制对端只能操作白名单群 |
 | `allowedActions` | `[]` | 严格模式下额外放行的 Action 名称 |
@@ -202,6 +208,18 @@ HTTP 事件端点可以返回 OneBot 快速操作对象，或返回以下通用 
 - 登录状态、版本信息等必要的全局只读 Action 可以执行。
 - 私聊、按 `message_id` 查询消息等无法可靠确定所属群的 Action 默认拒绝。
 - 可通过 `allowedActions` 明确放行额外 Action，但这可能扩大对端可访问的数据范围。
+- Action 别名 `_async`、`_rate_limited` 在权限判定前归一化为基名，`allowedActions` 中写任一别名即可覆盖三种调用形式。
+
+### 私聊联系人边界
+
+`allowedPrivateIds` 把私聊暴露面限制到指定联系人：
+
+- 名单为空表示不启用联系人级限制：`forwardPrivateMessages: true` 时私聊事件按旧行为全部转发，`allowedActions` 显式授权保持兼容；空名单不会因自动放行集获得新能力。
+- 名单非空时：只有名单内联系人的私聊事件会转发；目标 `user_id` 不在名单内的私聊 Action 一律返回 `retcode: 1403`，该判定先于 `allowedActions` 显式授权。
+- 目标预检覆盖 14 个以 `user_id` 为目标的敏感 Action：`send_private_msg`、`send_private_forward_msg`、`mark_private_msg_as_read`、`nc_get_user_status`、`send_msg`、`send_forward_msg`、`set_input_status`、`send_like`、`friend_poke`、`get_friend_msg_history`、`upload_private_file`、`forward_friend_single_msg`、`get_profile_like`、`set_friend_remark`。其中 `send_msg`、`send_forward_msg` 仅在私聊形态（带 `user_id` 且非 `message_type: "group"`）进入预检，群形态保持原有群路径。
+- 其中 6 个低风险出站/状态 Action（`send_private_msg`、`send_private_forward_msg`、`mark_private_msg_as_read`、`nc_get_user_status`、`send_msg`、`send_forward_msg`）在名单非空且目标命中名单时自动放行，无需写入 `allowedActions`；其余 8 个仍需显式授权。
+- 私聊形态的 Action 不允许携带 `group_id`（如 `friend_poke` 即使该群在白名单内也拒绝）；`send_private_forward_msg` 不允许 `message_type: "group"`。
+- `get_msg` 可以调用，但结果按消息属主授权：私聊结果只有 `user_id` 命中联系人名单才返回；机器人自身消息无法确定对端时扣留结果；群结果只有命中群白名单才返回。
 
 插件只能控制经过自身的连接。若保留 NapCat 原生直连或另一个未过滤连接，对端仍可能从该连接收到其他群事件。
 
@@ -210,3 +228,7 @@ HTTP 事件端点可以返回 OneBot 快速操作对象，或返回以下通用 
 - WebSocket 客户端离线期间不会缓存事件。
 - HTTP 事件队列位于内存中，重启插件后不会保留。
 - 不负责 TLS 终止；公网使用时建议放在受信任的 HTTPS/WSS 反向代理之后。
+- `get_private_file_url`、`delete_msg`、`set_msg_emoji_like` 无法验证目标联系人，不受联系人边界约束；通过 `allowedActions` 显式放行等于主动扩大访问面。
+- `get_stranger_info` 不做联系人目标预检（群聊 @ 昵称兜底依赖该 Action）。
+- `.handle_quick_operation` 是复合 Action，联系人白名单无法保证覆盖其内部行为；显式放行即用户主动扩大边界。
+- 不使用事件缓存反查 `message_id` 或 `file_id` 的消息属主。
