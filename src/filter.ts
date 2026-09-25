@@ -9,7 +9,42 @@ const SAFE_GLOBAL_ACTIONS = new Set([
   'get_group_list',
 ]);
 
+// 私聊目标预检集合（14 项）：目标只能是 user_id 的敏感 Action，必须先确认私聊属主再看授权。
+// 不变量：PRIVATE_TARGET_PRECHECK 与 SAFE_GLOBAL_ACTIONS 不相交（14 ∩ 6 = ∅）。
+const PRIVATE_TARGET_PRECHECK = new Set([
+  'send_private_msg',
+  'send_private_forward_msg',
+  'mark_private_msg_as_read',
+  'nc_get_user_status',
+  'send_msg',
+  'send_forward_msg',
+  'set_input_status',
+  'send_like',
+  'friend_poke',
+  'get_friend_msg_history',
+  'upload_private_file',
+  'forward_friend_single_msg',
+  'get_profile_like',
+  'set_friend_remark',
+]);
+
+// 私聊自动放行集（6 项 A 类，均为低风险出站/状态行为）：
+// 只有 allowedPrivateIds 非空且预检确认目标命中名单时才免 allowedActions；空名单一律不自动放行。
+const PRIVATE_AUTO_ALLOW_ACTIONS = new Set([
+  'send_private_msg',
+  'send_private_forward_msg',
+  'mark_private_msg_as_read',
+  'nc_get_user_status',
+  'send_msg',
+  'send_forward_msg',
+]);
+
 export function getGroupId(value: unknown): string | undefined {
+  if (typeof value === 'string' || typeof value === 'number') return String(value);
+  return undefined;
+}
+
+export function getUserId(value: unknown): string | undefined {
   if (typeof value === 'string' || typeof value === 'number') return String(value);
   return undefined;
 }
@@ -20,6 +55,13 @@ export function normalizeActionName(raw: string): string {
   return raw.replace(/_(async|rate_limited)$/, '');
 }
 
+// 私聊入站判定：未开启转发 → 拒绝；名单为空 → 旧兼容放行全部私聊；名单非空 → 仅放行命中联系人。
+function privateDecision(profile: NetworkProfile, userId: string | undefined): 'allow' | 'legacy-all' | 'deny' {
+  if (!profile.forwardPrivateMessages) return 'deny';
+  if (profile.allowedPrivateIds.length === 0) return 'legacy-all';
+  return userId !== undefined && profile.allowedPrivateIds.includes(userId) ? 'allow' : 'deny';
+}
+
 export function shouldForwardEvent(profile: NetworkProfile, event: OneBotEvent): boolean {
   const postType = String(event.post_type ?? '');
   const groupId = getGroupId(event.group_id);
@@ -27,9 +69,45 @@ export function shouldForwardEvent(profile: NetworkProfile, event: OneBotEvent):
   if (groupId !== undefined) return profile.allowedGroupIds.includes(groupId);
   if (postType === 'meta_event') return profile.forwardMetaEvents;
   if (postType === 'message' || postType === 'message_sent') {
-    return event.message_type === 'private' && profile.forwardPrivateMessages;
+    return privateDecision(profile, getUserId(event.user_id)) !== 'deny';
   }
   return profile.forwardNonGroupEvents;
+}
+
+type PrivateTargetCheck =
+  | { deny: true; reason: string }
+  | { deny: false; inPrecheck: true; userId: string }
+  | { deny: false; inPrecheck: false };
+
+// 私聊目标预检（《最小变更方案 v5》§4.3）：只拒绝、不放行，且先于显式 allowedActions 判定。
+function evaluatePrivateTarget(
+  profile: NetworkProfile,
+  action: string,
+  params: Record<string, unknown>,
+): PrivateTargetCheck {
+  // send_msg / send_forward_msg 仅私聊形态进入预检；群形态继续走既有群路径，群聊行为不变。
+  const conditionalEntry = action === 'send_msg' || action === 'send_forward_msg';
+  const privateForm = getUserId(params.user_id) !== undefined && params.message_type !== 'group';
+  const inPrecheck = PRIVATE_TARGET_PRECHECK.has(action) && (!conditionalEntry || privateForm);
+  if (!inPrecheck) return { deny: false, inPrecheck: false };
+
+  // 1. 参数熔断：私聊形态不允许携带 group_id；send_private_forward_msg 不允许 message_type=group。
+  if (getGroupId(params.group_id) !== undefined) {
+    return { deny: true, reason: `私聊目标 Action ${action} 不允许携带不可信 group_id 参数` };
+  }
+  if (action === 'send_private_forward_msg' && params.message_type === 'group') {
+    return { deny: true, reason: `私聊目标 Action ${action} 不允许携带不可信 message_type=group 参数` };
+  }
+  // 2. 目标解析：无法解析出合法 user_id → 拒绝。
+  const userId = getUserId(params.user_id);
+  if (userId === undefined) {
+    return { deny: true, reason: `私聊目标 Action ${action} 缺少合法 user_id 参数` };
+  }
+  // 3. 名单判定：名单非空且目标不在名单 → 拒绝；空名单表示联系人边界未启用，本层不拒绝。
+  if (profile.allowedPrivateIds.length > 0 && !profile.allowedPrivateIds.includes(userId)) {
+    return { deny: true, reason: `联系人 ${userId} 不在配置 ${profile.name} 的私聊白名单中` };
+  }
+  return { deny: false, inPrecheck: true, userId };
 }
 
 export function isActionAllowed(
@@ -38,9 +116,20 @@ export function isActionAllowed(
   params: Record<string, unknown>,
 ): { allowed: boolean; reason?: string } {
   if (!profile.strictActionGuard) return { allowed: true };
-  // 请求名与 allowedActions 每一项都先归一化再比较，杜绝 _async / _rate_limited 后缀绕过。
   const normalizedAction = normalizeActionName(action);
+  // 私聊目标预检先于显式授权：确认目标私聊属主之前，allowedActions 不放行（§4.3）。
+  const privateCheck = evaluatePrivateTarget(profile, normalizedAction, params);
+  if (privateCheck.deny) return { allowed: false, reason: privateCheck.reason };
+  // 请求名与 allowedActions 每一项都先归一化再比较，杜绝 _async / _rate_limited 后缀绕过。
   if (profile.allowedActions.some((name) => normalizeActionName(name) === normalizedAction)) return { allowed: true };
+  // 私聊自动放行：名单非空且目标命中名单的 6 项 A 类免 allowedActions；空名单一律不自动放行。
+  if (
+    privateCheck.inPrecheck &&
+    profile.allowedPrivateIds.length > 0 &&
+    PRIVATE_AUTO_ALLOW_ACTIONS.has(normalizedAction)
+  ) {
+    return { allowed: true };
+  }
 
   const groupId = getGroupId(params.group_id);
   if (groupId !== undefined) {
