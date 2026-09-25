@@ -21,6 +21,7 @@ export interface NetworkProfile {
   url: string;
   accessToken: string;
   allowedGroupIds: string[];
+  allowedPrivateIds: string[];
   forwardPrivateMessages: boolean;
   forwardNonGroupEvents: boolean;
   forwardMetaEvents: boolean;

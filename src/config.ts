@@ -86,6 +86,7 @@ export function parseProfiles(profilesJson: string): NetworkProfile[] {
       url: asString(raw.url),
       accessToken: asString(raw.accessToken),
       allowedGroupIds: asStringArray(raw.allowedGroupIds),
+      allowedPrivateIds: asStringArray(raw.allowedPrivateIds),
       forwardPrivateMessages: asBoolean(raw.forwardPrivateMessages, false),
       forwardNonGroupEvents: asBoolean(raw.forwardNonGroupEvents, false),
       forwardMetaEvents: asBoolean(raw.forwardMetaEvents, true),
@@ -116,6 +117,12 @@ export function validateProfiles(value: unknown): NetworkProfile[] {
         : new Set(['http:', 'https:']);
       if (!allowedProtocols.has(url.protocol)) {
         throw new Error(`配置“${profile.name}”的 URL 协议与传输类型不匹配`);
+      }
+    }
+    // 服务端校验联系人 QQ 号，浏览器校验不可信（AGENTS.md 安全约定）。
+    for (const value of profile.allowedPrivateIds) {
+      if (!/^\d+$/.test(value)) {
+        throw new Error(`配置“${profile.name}”的联系人 QQ 号无效: ${value}`);
       }
     }
   }
