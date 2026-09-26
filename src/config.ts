@@ -120,9 +120,9 @@ export function validateProfiles(value: unknown): NetworkProfile[] {
       }
     }
     // 服务端校验联系人 QQ 号，浏览器校验不可信（AGENTS.md 安全约定）。
-    for (const value of profile.allowedPrivateIds) {
-      if (!/^\d+$/.test(value)) {
-        throw new Error(`配置“${profile.name}”的联系人 QQ 号无效: ${value}`);
+    for (const id of profile.allowedPrivateIds) {
+      if (!/^\d+$/.test(id)) {
+        throw new Error(`配置“${profile.name}”的联系人 QQ 号无效: ${id}`);
       }
     }
   }
