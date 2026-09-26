@@ -154,6 +154,16 @@ export function isActionAllowed(
   }
 
   if (SAFE_GLOBAL_ACTIONS.has(normalizedAction)) return { allowed: true };
+  // B 类预检 Action：目标已通过预检（可解析、无 group_id 熔断、未被名单拒绝），仅缺
+  // allowedActions 显式授权。返回准确理由，避免落到“无法关联到白名单群”误导用户去调群白名单。
+  if (privateCheck.inPrecheck) {
+    return {
+      allowed: false,
+      reason: profile.allowedPrivateIds.length > 0
+        ? `Action ${action} 目标在联系人名单内，但未被 allowedActions 显式授权`
+        : `Action ${action} 目标为有效私聊联系人，但未被 allowedActions 显式授权`,
+    };
+  }
   return { allowed: false, reason: `严格模式禁止无法关联到白名单群的 Action: ${action}` };
 }
 
