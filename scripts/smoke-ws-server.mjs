@@ -136,6 +136,16 @@ async function runActionCases(channel) {
       payload: { action: 'set_input_status', params: { user_id: 22222 }, echo: 'e11' },
       check: (r) => r.retcode === 1403 && String(r.message).includes('allowedActions'),
     },
+    {
+      desc: 'send_msg 私聊形态命中名单自动放行（不进群路径）',
+      payload: { action: 'send_msg', params: { user_id: 22222, message: 'hi' }, echo: 'e12' },
+      check: (r) => r.retcode === 0,
+    },
+    {
+      desc: 'send_msg 群形态走 group_id 白名单分支',
+      payload: { action: 'send_msg', params: { message_type: 'group', group_id: 10001, message: 'hi' }, echo: 'e13' },
+      check: (r) => r.retcode === 0,
+    },
   ];
 
   for (const item of cases) {
@@ -237,6 +247,7 @@ try {
           return { user_id: 10000, nickname: 'smoke-test' };
         }
         if (actionName === 'send_private_msg') return { message_id: 1 };
+        if (actionName === 'send_msg') return { message_id: 2 };
         if (actionName === 'send_like' || actionName === 'send_like_async') return { result: true };
         if (actionName === 'friend_poke') return {};
         if (actionName === 'get_msg') {
@@ -278,7 +289,7 @@ try {
   }), 'utf8');
   await plugin.plugin_init(context);
   const channelC = await connectSmoke(portC);
-  const selfIdResponse = await channelC.sendAction({ action: 'get_msg', params: { message_id: 701 }, echo: 'e12' });
+  const selfIdResponse = await channelC.sendAction({ action: 'get_msg', params: { message_id: 701 }, echo: 'e14' });
   if (!(selfIdResponse.retcode === 1403 && selfIdResponse.data == null && String(selfIdResponse.message).includes('selfId'))) {
     throw new Error(`selfId 不可用时 get_msg 私聊结果应被扣留: ${JSON.stringify(selfIdResponse)}`);
   }
