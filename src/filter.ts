@@ -68,7 +68,18 @@ export function shouldForwardEvent(profile: NetworkProfile, event: OneBotEvent):
 
   if (groupId !== undefined) return profile.allowedGroupIds.includes(groupId);
   if (postType === 'meta_event') return profile.forwardMetaEvents;
-  if (postType === 'message' || postType === 'message_sent') {
+  if (postType === 'message_sent') {
+    // NapCat 证据（packages/napcat-onebot）：私聊 message_sent 的 user_id 是机器人自身
+    // （senderUin === selfInfo.uin 时 post_type 才为 message_sent），对端联系人写入 target_id
+    // （obMsg.target_id = peerUin）。必须按 target_id 判定对端，否则名单非空时机器人发往
+    // 已允许联系人的消息被误拒（回归）。缺少 target_id 无法确定对端，与 group_id 熔断原则
+    // 一致 fail-closed 拒绝；群聊 message_sent 带 group_id，已在上方群名单分支处理。
+    const targetId = getUserId(event.target_id);
+    if (targetId === undefined) return false;
+    return privateDecision(profile, targetId) !== 'deny';
+  }
+  if (postType === 'message') {
+    // 收到的私聊消息：user_id 是对端发送者，按其判定。
     return privateDecision(profile, getUserId(event.user_id)) !== 'deny';
   }
   return profile.forwardNonGroupEvents;
